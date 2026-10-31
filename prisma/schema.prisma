@@ -1,0 +1,459 @@
+// Transnumerica Prisma Schema - PostgreSQL on Supabase
+// Configured with Connection Pooling (port 6543) and Direct Connection (port 5432)
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ---------------------- RBAC & AUDIT (WORM) ----------------------
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  OPERATIONS
+  FINANCE
+  SUPPORT
+  CONTENT
+  DRIVER_MOTO
+  DRIVER_CAR
+  SHUTTLE_OPERATOR
+  SHUTTLE_STAFF
+  PASSENGER
+}
+
+enum AccountStatus {
+  ACTIVE
+  DISABLED
+  SUSPENDED
+  PENDING_REVIEW
+}
+
+model AdminUser {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  phone        String
+  role         UserRole      @default(ADMIN)
+  status       AccountStatus @default(ACTIVE)
+  permissions  String[]
+  passwordHash String
+  salt         String
+  totpEnabled  Boolean       @default(false)
+  totpSecret   String?
+  forceTotp    Boolean       @default(true)
+  version      Int           @default(1)
+  deletedAt    DateTime?
+  deletedBy    String?
+  deletionReason String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  sessions     AdminSession[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+}
+
+model AdminSession {
+  id           String    @id @default(cuid())
+  adminId      String
+  token        String    @unique
+  ipAddress    String
+  userAgent    String?
+  role         UserRole
+  expiresAt    DateTime
+  lastReauthAt DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+
+  admin        AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model AuditLogEntry {
+  id             String    @id @default(cuid())
+  sequenceNumber Int       @unique @default(autoincrement())
+  timestamp      DateTime  @default(now())
+  adminUser      String
+  actor          String
+  actorRole      String
+  action         String
+  target         String
+  entityType     String
+  entityId       String
+  previousState  Json?
+  newState       Json?
+  reason         String
+  ipAddress      String
+  userAgent      String?
+  status         String    @default("SUCCESS")
+  currentHash    String
+  previousHash   String
+  isVerified     Boolean   @default(true)
+
+  @@index([timestamp])
+  @@index([adminUser])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([sequenceNumber])
+}
+
+// ---------------------- DRIVERS & PROVIDERS (KYC) ----------------------
+
+enum ProviderType {
+  MOTO
+  CAR
+  SHUTTLE_OPERATOR
+  SHUTTLE_STAFF
+}
+
+enum KycStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  NEEDS_INFO
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+model DriverProfile {
+  id                String       @id @default(cuid())
+  userId            String?      @unique
+  phone             String       @unique
+  fullName          String
+  providerType      ProviderType
+  city              String       @default("Kinshasa")
+  kycStatus         KycStatus    @default(DRAFT)
+  rejectionReason   String?
+  missingInfoReason String?
+  canOperate        Boolean      @default(false)
+  
+  // KYC Personal Data
+  dateOfBirth       DateTime?
+  residentialAddress String?
+  emergencyContact  String?
+  idDocType         String?
+  idDocNumber       String?
+  idDocExpiry       DateTime?
+  idDocFrontUrl     String?
+  idDocBackUrl      String?
+  selfieUrl         String?
+  livenessVerified  Boolean      @default(false)
+  criminalRecordUrl String?
+  
+  // Payout Details
+  payoutProvider    String?
+  payoutPhone       String?
+  payoutName        String?
+  bankName          String?
+  bankAccount       String?
+
+  // Terms & Consents
+  termsAcceptedAt   DateTime?
+  termsVersion      String?
+  consentIp         String?
+
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  vehicles          Vehicle[]
+  documents         DriverDocument[]
+  companyId         String?
+  company           ShuttleCompany? @relation(fields: [companyId], references: [id])
+
+  @@index([phone])
+  @@index([providerType])
+  @@index([kycStatus])
+  @@index([city])
+}
+
+model ShuttleCompany {
+  id              String          @id @default(cuid())
+  name            String
+  legalForm       String
+  rccm            String          @unique
+  idNat           String          @unique
+  nif             String          @unique
+  city            String          @default("Kinshasa")
+  address         String
+  licenseNumber   String
+  licenseDocUrl   String?
+  logoUrl         String?
+  kycStatus       KycStatus       @default(DRAFT)
+  rejectionReason String?
+  canOperate      Boolean         @default(false)
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  drivers         DriverProfile[]
+  vehicles        Vehicle[]
+
+  @@index([rccm])
+  @@index([kycStatus])
+}
+
+model Vehicle {
+  id               String         @id @default(cuid())
+  driverId         String?
+  companyId        String?
+  providerType     ProviderType
+  plateNumber      String         @unique
+  make             String
+  model            String
+  year             Int
+  color            String
+  chassisNumber    String?
+  seatsCount       Int            @default(4)
+  carteRoseUrl     String?
+  insuranceUrl     String?
+  insuranceExpiry  DateTime?
+  inspectionUrl    String?
+  inspectionExpiry DateTime?
+  ownerAuthUrl     String?
+  hasAc            Boolean        @default(false)
+  hasLuggageSpace  Boolean        @default(false)
+  status           String         @default("ACTIVE")
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  driver           DriverProfile? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  company          ShuttleCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([plateNumber])
+  @@index([driverId])
+  @@index([companyId])
+}
+
+model DriverDocument {
+  id           String        @id @default(cuid())
+  driverId     String
+  documentType String
+  fileUrl      String
+  fileName     String
+  fileSize     Int
+  mimeType     String
+  status       String        @default("PENDING")
+  uploadedAt   DateTime      @default(now())
+
+  driver       DriverProfile @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId])
+  @@index([documentType])
+}
+
+// ---------------------- KYC REQUIREMENTS CONFIGURATION ----------------------
+
+model KycRequirementVersion {
+  id          String   @id @default(cuid())
+  version     Int      @unique
+  status      String   @default("PUBLISHED") // DRAFT, PUBLISHED, ARCHIVED
+  publishedAt DateTime?
+  publishedBy String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  rulesJson   Json     // Full snapshot of requirement rules
+
+  @@index([version])
+  @@index([status])
+}
+
+// ---------------------- TRANSPORT CATALOG & BOOKINGS ----------------------
+
+model Corridor {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  name        String
+  originCity  String
+  destCity    String
+  distanceKm  Float
+  basePrice   Float
+  currency    String    @default("CDF")
+  status      String    @default("ACTIVE")
+  deletedAt   DateTime?
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  bookings    Booking[]
+
+  @@index([code])
+  @@index([originCity, destCity])
+  @@index([status])
+}
+
+model Booking {
+  id             String    @id @default(cuid())
+  ticketNumber   String    @unique
+  corridorId     String?
+  passengerName  String
+  passengerPhone String
+  origin         String
+  destination    String
+  travelDate     DateTime
+  seatNumber     String
+  amount         Float
+  currency       String    @default("CDF")
+  status         String    @default("CONFIRMED") // CONFIRMED, COMPLETED, CANCELLED, REFUNDED
+  qrCode         String?
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  corridor       Corridor? @relation(fields: [corridorId], references: [id])
+  payments       Payment[]
+
+  @@index([ticketNumber])
+  @@index([passengerPhone])
+  @@index([travelDate])
+  @@index([status])
+}
+
+// ---------------------- PAYMENTS & FINANCIALS ----------------------
+
+enum PaymentProvider {
+  VODACOM_MPESA
+  AIRTEL_MONEY
+  ORANGE_MONEY
+  AFRIMOBEY
+  CASH
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  SETTLED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id                String          @id @default(cuid())
+  reference         String          @unique
+  bookingId         String?
+  provider          PaymentProvider
+  providerReference String?
+  amount            Float
+  currency          String          @default("CDF")
+  status            PaymentStatus   @default(SETTLED)
+  serviceType       String          // BUS, RIDE, DELIVERY
+  payerPhone        String
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  booking           Booking?        @relation(fields: [bookingId], references: [id])
+
+  @@index([reference])
+  @@index([payerPhone])
+  @@index([status])
+  @@index([provider])
+}
+
+model Payout {
+  id              String    @id @default(cuid())
+  reference       String    @unique
+  beneficiaryId   String
+  beneficiaryType String    // DRIVER, OPERATOR
+  beneficiaryName String
+  beneficiaryPhone String
+  provider        PaymentProvider
+  amount          Float
+  currency        String    @default("CDF")
+  status          String    @default("EXECUTED") // PENDING, APPROVED, EXECUTED, REJECTED
+  approvedBy      String?
+  executedAt      DateTime?
+  reason          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([reference])
+  @@index([beneficiaryId])
+  @@index([status])
+}
+
+// ---------------------- SUPPORT & DISPUTES ----------------------
+
+model SupportTicket {
+  id          String   @id @default(cuid())
+  ticketNumber String  @unique
+  subject     String
+  customerName String
+  customerPhone String
+  category    String   // BOOKING, RIDE, REFUND, ACCOUNT, TECHNICAL
+  priority    String   @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  status      String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  assignedTo  String?
+  messages    Json     // Array of ticket messages
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ticketNumber])
+  @@index([customerPhone])
+  @@index([status])
+}
+
+model Dispute {
+  id          String   @id @default(cuid())
+  disputeNumber String @unique
+  bookingRef  String?
+  claimant    String
+  claimantRole String  // PASSENGER, DRIVER
+  reason      String
+  status      String   @default("OPEN") // OPEN, REVIEWING, RESOLVED, REJECTED
+  resolution  String?
+  amountClaimed Float?
+  amountRefunded Float?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([disputeNumber])
+  @@index([status])
+}
+
+// ---------------------- CMS & PLATFORM TOGGLES ----------------------
+
+model CityServiceToggle {
+  id          String   @id @default(cuid())
+  city        String
+  serviceKey  String   // moto, car, bus, delivery
+  isEnabled   Boolean  @default(true)
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([city, serviceKey])
+  @@index([city])
+}
+
+model CmsArticle {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  title       String
+  category    String    // NEWS, SAFETY, PROMO, REGULATION
+  content     String
+  excerpt     String?
+  coverImage  String?
+  isPublished Boolean   @default(true)
+  publishedAt DateTime? @default(now())
+  authorName  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([slug])
+  @@index([category])
+  @@index([isPublished])
+}
+
