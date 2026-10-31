@@ -116,6 +116,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!onboardingSeen && !isAutomated) {
         setShowOnboardingModal(true);
       }
+
+      // Sync Supabase Auth session if active
+      fetch('/api/auth/me')
+        .then((r) => r.json())
+        .then((d) => {
+          if (d?.authenticated && d?.user) {
+            setIsAuthenticated(true);
+            setCurrentUser((prev) => ({
+              ...prev,
+              phone: d.user.phone || prev.phone,
+              name: d.user.name || prev.name,
+            }));
+          }
+        })
+        .catch(() => {});
     } catch {}
   }, []);
 
@@ -144,6 +159,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsAuthenticated(false);
     try {
       localStorage.setItem('tn_auth', 'false');
+      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     } catch {}
   };
 

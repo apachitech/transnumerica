@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { updateSession } from './lib/supabase/middleware';
 
 export const ADMIN_SESSION_COOKIE_NAME = 'tn_admin_session_token';
 export const DRIVER_SESSION_COOKIE_NAME = 'tn_driver_session_token';
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // 1. Admin login portal and admin auth API
@@ -91,9 +92,18 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  // 7. Refresh Supabase Auth cookies and propagate session for public & passenger routes
+  const { response } = await updateSession(req);
+  return response;
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*', '/driver/:path*', '/api/driver/:path*'],
+  matcher: [
+    '/admin/:path*',
+    '/api/admin/:path*',
+    '/driver/:path*',
+    '/api/driver/:path*',
+    '/account/:path*',
+    '/api/auth/:path*',
+  ],
 };

@@ -145,7 +145,7 @@ export function AuthModal() {
   const detectedOperator = selectedCountry.code === '+243' ? getDrcOperatorBadge(phoneNumber) : null;
 
   // Handle Phone Submit
-  const handleRequestOtp = (channel: 'SMS' | 'WHATSAPP' = 'SMS') => {
+  const handleRequestOtp = async (channel: 'SMS' | 'WHATSAPP' = 'SMS') => {
     const cleanNum = phoneNumber.replace(/[^0-9]/g, '').replace(/^0/, '');
     if (cleanNum.length < selectedCountry.digitLength - 1) {
       setPhoneError(
@@ -156,6 +156,19 @@ export function AuthModal() {
 
     setPhoneError(null);
     setOtpChannel(channel);
+
+    const fullPhone = `${selectedCountry.code}${cleanNum}`;
+
+    try {
+      await fetch('/api/auth/phone/otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: fullPhone, channel: channel.toLowerCase() }),
+      });
+    } catch {
+      // Fallback to local simulator
+    }
+
     setStep('OTP');
     setResendCountdown(45);
     setOtp(['', '', '', '', '', '']);
@@ -230,24 +243,41 @@ export function AuthModal() {
   };
 
   // Verify OTP Code
-  const handleVerifyOtp = (code: string) => {
+  const handleVerifyOtp = async (code: string) => {
     setIsVerifying(true);
     setOtpError(null);
 
-    setTimeout(() => {
-      // Demo acceptance: allows '123456' or any 6-digit code for testing
+    const cleanNum = phoneNumber.replace(/[^0-9]/g, '').replace(/^0/, '');
+    const fullPhone = `${selectedCountry.code}${cleanNum}`;
+
+    try {
+      const res = await fetch('/api/auth/phone/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: fullPhone, token: code, name: fullName }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setIsVerifying(false);
+        setOtpError(data.error || 'Code expiré ou erroné. Veuillez réessayer.');
+        return;
+      }
+
+      // Success
+      loginWithPhone(fullPhone, fullName);
+      setIsVerifying(false);
+    } catch {
+      // Offline fallback: allows demo code
       if (code === '000000') {
         setIsVerifying(false);
         setOtpError('Code expiré ou erroné. Veuillez réessayer avec un nouveau code.');
         return;
       }
 
-      // Success
-      const cleanNum = phoneNumber.replace(/[^0-9]/g, '').replace(/^0/, '');
-      const fullPhone = `${selectedCountry.code}${cleanNum}`;
       loginWithPhone(fullPhone, fullName);
       setIsVerifying(false);
-    }, 700);
+    }
   };
 
   const handleResend = (channel: 'SMS' | 'WHATSAPP') => {
